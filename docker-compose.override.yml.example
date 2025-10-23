@@ -1,0 +1,15 @@
+# Пример файла docker-compose.override.yml для разработки
+# Скопируйте в docker-compose.override.yml для использования
+
+version: '3.8'
+
+services:
+  bot:
+    # Монтирование кода для live-reload при разработке
+    volumes:
+      - .:/app
+    # Переопределение команды для отладки
+    # command: python -u bot.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=DEBUG

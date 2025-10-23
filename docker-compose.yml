@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: macos_update_checker
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./config.py:/app/config.py:ro
+    environment:
+      - TZ=Europe/Riga
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

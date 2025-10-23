@@ -1,0 +1,22 @@
+[Unit]
+Description=macOS Update Checker Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your_user
+WorkingDirectory=/path/to/macos_update_checker
+ExecStart=/path/to/macos_update_checker/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+# Логирование
+StandardOutput=append:/var/log/macos_update_checker/bot.log
+StandardError=append:/var/log/macos_update_checker/error.log
+
+# Безопасность
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
