@@ -11,7 +11,6 @@ from scraper import MacOSScraper
 import config
 
 # Настройка логирования
-import os
 log_dir = '/app/data' if os.path.exists('/app/data') else '.'
 log_path = os.path.join(log_dir, 'bot.log')
 
@@ -115,6 +114,7 @@ class MacOSUpdateBot:
             return
 
         last_check = self.db.get_last_check()
+        total_releases = self.db.count_releases()
         
         if last_check:
             check_time = datetime.fromisoformat(last_check['check_time'])
@@ -123,13 +123,15 @@ class MacOSUpdateBot:
                 f"🕐 Последняя проверка: {check_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
                 f"📦 Найдено релизов: {last_check['releases_found']}\n"
                 f"🆕 Новых релизов: {last_check['new_releases']}\n"
-                f"✅ Статус: {last_check['status']}\n\n"
+                f"✅ Статус: {last_check['status']}\n"
+                f"💾 Всего в БД: {total_releases}\n\n"
                 f"⏱ Интервал проверки: {config.CHECK_INTERVAL // 3600} час(а)"
             )
         else:
             status_text = (
                 "📊 *Статус бота*\n\n"
                 "Проверок еще не было.\n"
+                f"💾 Всего в БД: {total_releases}\n"
                 f"⏱ Интервал проверки: {config.CHECK_INTERVAL // 3600} час(а)"
             )
 
@@ -152,7 +154,7 @@ class MacOSUpdateBot:
                 f"📦 Версия: {latest_public['version']}\n"
                 f"🔨 Build: {latest_public['build']}\n"
                 f"📅 Обнаружен: {datetime.fromisoformat(latest_public['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
-                f"⬇️ [Скачать](https://swcdn.apple.com/...)\n\n"
+                f"⬇️ [Скачать]({latest_public['download_url']})\n\n"
             )
         else:
             response += "🟢 *Public Release*\nНет данных\n\n"
@@ -163,7 +165,7 @@ class MacOSUpdateBot:
                 f"📦 Версия: {latest_beta['version']}\n"
                 f"🔨 Build: {latest_beta['build']}\n"
                 f"📅 Обнаружен: {datetime.fromisoformat(latest_beta['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
-                f"⬇️ [Скачать](https://swcdn.apple.com/...)\n"
+                f"⬇️ [Скачать]({latest_beta['download_url']})\n"
             )
         else:
             response += "🟡 *Beta Release*\nНет данных"
@@ -212,6 +214,9 @@ class MacOSUpdateBot:
         """Проверка обновлений"""
         logger.info("Начинаю проверку обновлений...")
         
+        # Проверяем, первый ли это запуск
+        is_first_run = self.db.count_releases() == 0
+        
         result = self.scraper.scrape()
         
         if not result['success']:
@@ -246,7 +251,56 @@ class MacOSUpdateBot:
 
         # Отправляем уведомления о новых релизах
         if new_releases:
-            await self.send_notifications(new_releases)
+            if is_first_run:
+                # При первом запуске отправляем только сводку
+                logger.info(f"Первый запуск: найдено {len(new_releases)} релизов, отправляю только сводку")
+                await self.send_first_run_summary(new_releases)
+            else:
+                # При обычной работе отправляем уведомления о каждом новом релизе
+                await self.send_notifications(new_releases)
+
+    async def send_first_run_summary(self, releases: list):
+        """Отправка сводки при первом запуске (вместо спама всеми релизами)"""
+        public_releases = [r for r in releases if r['release_type'] == 'public']
+        beta_releases = [r for r in releases if r['release_type'] == 'beta']
+        
+        # Получаем самые новые версии
+        latest_public = self.db.get_latest_release('public')
+        latest_beta = self.db.get_latest_release('beta')
+        
+        message = (
+            "🎉 *Бот запущен!*\n\n"
+            f"Добавлено в базу данных:\n"
+            f"🟢 Public релизов: {len(public_releases)}\n"
+            f"🟡 Beta релизов: {len(beta_releases)}\n\n"
+            "*Последние версии:*\n\n"
+        )
+        
+        if latest_public:
+            message += (
+                f"🟢 *Public:* {latest_public['version']} (Build {latest_public['build']})\n"
+                f"⬇️ [Скачать]({latest_public['download_url']})\n\n"
+            )
+        
+        if latest_beta:
+            message += (
+                f"🟡 *Beta:* {latest_beta['version']} (Build {latest_beta['build']})\n"
+                f"⬇️ [Скачать]({latest_beta['download_url']})\n\n"
+            )
+        
+        message += "Используйте /latest для просмотра последних релизов."
+        
+        for chat_id in config.NOTIFICATION_TARGETS:
+            try:
+                await self.app.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=True
+                )
+                logger.info(f"Сводка первого запуска отправлена в чат {chat_id}")
+            except Exception as e:
+                logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
 
     async def send_notifications(self, releases: list):
         """Отправка уведомлений о новых релизах"""
@@ -288,8 +342,6 @@ class MacOSUpdateBot:
             message += f"📅 Дата: {release['date_published']}\n"
         
         if release['download_url']:
-            # Сокращаем URL для читаемости
-            short_url = release['download_url'][:50] + "..."
             message += f"\n⬇️ [Скачать InstallAssistant.pkg]({release['download_url']})\n"
         
         message += "\n💾 Размер: ~13 GB"

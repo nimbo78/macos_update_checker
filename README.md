@@ -129,6 +129,16 @@ CHECK_INTERVAL = 3600  # 1 час
 - `/myid` - Узнать свой Telegram ID
 - `/check` - Принудительная проверка обновлений (только для админов)
 
+## Документация
+
+- [README.md](README.md) - Основная документация (этот файл)
+- [QUICKSTART.md](QUICKSTART.md) - Быстрый старт за 5 минут
+- [INSTALL.md](INSTALL.md) - Подробная инструкция по установке
+- [UPDATE.md](UPDATE.md) - Инструкция по обновлению
+- [USAGE.md](USAGE.md) - Примеры использования и FAQ
+- [DEPLOY.md](DEPLOY.md) - Деплой на сервер
+- [CHANGELOG.md](CHANGELOG.md) - История изменений
+
 ## Структура проекта
 
 ```
@@ -165,18 +175,16 @@ docker-compose down
 
 ## Обновление
 
+**Подробная инструкция:** См. [UPDATE.md](UPDATE.md)
+
+**Быстрое обновление (Docker):**
 ```bash
-# Остановите бота
-docker-compose down
+cd macos_update_checker && git pull && docker-compose down && docker-compose build --no-cache && docker-compose up -d
+```
 
-# Обновите код
-git pull
-
-# Пересоберите образ
-docker-compose build
-
-# Запустите заново
-docker-compose up -d
+**Быстрое обновление (Python):**
+```bash
+cd macos_update_checker && git pull && source venv/bin/activate && pip install -r requirements.txt --upgrade && python bot.py
 ```
 
 ## Troubleshooting

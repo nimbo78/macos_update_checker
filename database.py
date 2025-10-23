@@ -96,39 +96,48 @@ class Database:
             return releases
 
     def get_latest_release(self, release_type: Optional[str] = None) -> Optional[Dict]:
-        """Получить последний релиз"""
+        """Получить последний релиз (по версии, не по дате добавления)"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
+            # Получаем все релизы и сортируем по версии в Python
             if release_type:
                 cursor.execute("""
                     SELECT version, build, release_type, date_published, 
                            download_url, date_discovered
                     FROM releases
                     WHERE release_type = ?
-                    ORDER BY id DESC
-                    LIMIT 1
                 """, (release_type,))
             else:
                 cursor.execute("""
                     SELECT version, build, release_type, date_published, 
                            download_url, date_discovered
                     FROM releases
-                    ORDER BY id DESC
-                    LIMIT 1
                 """)
             
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'version': row[0],
-                    'build': row[1],
-                    'release_type': row[2],
-                    'date_published': row[3],
-                    'download_url': row[4],
-                    'date_discovered': row[5]
-                }
-            return None
+            rows = cursor.fetchall()
+            if not rows:
+                return None
+            
+            # Сортируем по версии (парсим как tuple чисел)
+            def parse_version(version_str):
+                try:
+                    parts = version_str.split('.')
+                    return tuple(int(p) for p in parts)
+                except:
+                    return (0, 0, 0)
+            
+            sorted_rows = sorted(rows, key=lambda r: parse_version(r[0]), reverse=True)
+            row = sorted_rows[0]
+            
+            return {
+                'version': row[0],
+                'build': row[1],
+                'release_type': row[2],
+                'date_published': row[3],
+                'download_url': row[4],
+                'date_discovered': row[5]
+            }
 
     def mark_as_notified(self, version: str, build: str, release_type: str):
         """Отметить релиз как уведомленный"""
@@ -171,3 +180,10 @@ class Database:
                     'status': row[3]
                 }
             return None
+
+    def count_releases(self) -> int:
+        """Подсчитать общее количество релизов в БД"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM releases")
+            return cursor.fetchone()[0]
