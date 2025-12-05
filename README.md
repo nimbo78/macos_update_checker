@@ -137,9 +137,9 @@ CHECK_INTERVAL = 3600  # 1 час
 # Ключ - название версии (отображается в уведомлениях)
 # Значение - URL страницы для парсинга
 MACOS_URLS = {
+    "Tahoe": "https://mrmacintosh.com/macos-tahoe-full-installer-database-download-directly-from-apple/",
     "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
-    "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
-    # "Ventura": "https://mrmacintosh.com/macos-ventura-full-installer-database-download-directly-from-apple/",
+    # "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
 }
 ```
 
