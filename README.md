@@ -1,6 +1,6 @@
 # 🍎 macOS Update Checker Bot
 
-Telegram-бот для автоматического отслеживания новых релизов macOS Sequoia с сайта [Mr. Macintosh](https://mrmacintosh.com/).
+Telegram-бот для автоматического отслеживания новых релизов macOS (Sequoia, Sonoma, Ventura и др.) с сайта [Mr. Macintosh](https://mrmacintosh.com/).
 
 ## 🚀 Как это работает
 
@@ -17,9 +17,10 @@ graph LR
 
 ## ✨ Возможности
 
-- 🔍 Автоматический мониторинг страницы с релизами macOS Sequoia
+- 🔍 Автоматический мониторинг **нескольких версий macOS** (Sequoia, Sonoma, Ventura и др.)
 - 🔔 Мгновенные уведомления о новых версиях (Public и Beta)
 - 📊 Детальная информация о каждом релизе (версия, build, ссылка на скачивание)
+- 🖥️ Поддержка мониторинга нескольких URL одновременно
 - 🛡️ Whitelist пользователей для защиты от несанкционированного доступа
 - 📢 Поддержка каналов для массовых уведомлений
 - 💾 SQLite база данных для хранения истории релизов
@@ -131,6 +132,33 @@ ADMIN_USER_IDS = [
 
 # Интервал проверки (в секундах)
 CHECK_INTERVAL = 3600  # 1 час
+
+# URL страниц для мониторинга разных версий macOS
+# Ключ - название версии (отображается в уведомлениях)
+# Значение - URL страницы для парсинга
+MACOS_URLS = {
+    "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
+    "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
+    # "Ventura": "https://mrmacintosh.com/macos-ventura-full-installer-database-download-directly-from-apple/",
+}
+```
+
+### Мониторинг нескольких версий macOS
+
+Бот поддерживает мониторинг нескольких версий macOS одновременно. Просто добавьте нужные URL в словарь `MACOS_URLS`:
+
+```python
+MACOS_URLS = {
+    "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
+    "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
+    "Ventura": "https://mrmacintosh.com/macos-ventura-full-installer-database-download-directly-from-apple/",
+}
+```
+
+Для обратной совместимости также поддерживается старый формат с одним URL:
+
+```python
+MACOS_URL = "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"
 ```
 
 ## 🤖 Команды бота
@@ -140,7 +168,7 @@ CHECK_INTERVAL = 3600  # 1 час
 | `/start` | Приветствие и список команд | Все |
 | `/help` | Справка по использованию | Все |
 | `/status` | Статус бота и последняя проверка | Все |
-| `/latest` | Последний релиз (Public и Beta) | Все |
+| `/latest` | Последние релизы всех версий macOS (Public и Beta) | Все |
 | `/myid` | Узнать свой Telegram ID | Все |
 | `/check` | Принудительная проверка | 🔐 Админы |
 
@@ -225,4 +253,4 @@ Apache License 2.0
 
 ---
 
-**Создано для мониторинга релизов macOS Sequoia** 🍎
+**Создано для мониторинга релизов macOS** 🍎

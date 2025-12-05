@@ -30,5 +30,15 @@ ADMIN_USER_IDS = [
 # 21600 = 6 часов
 CHECK_INTERVAL = 3600
 
-# URL страницы для мониторинга
-MACOS_URL = "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"
+# URL страниц для мониторинга разных версий macOS
+# Ключ - название версии (будет отображаться в уведомлениях)
+# Значение - URL страницы для парсинга
+MACOS_URLS = {
+    "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
+    # "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
+    # "Ventura": "https://mrmacintosh.com/macos-ventura-full-installer-database-download-directly-from-apple/",
+}
+
+# Для обратной совместимости (если у вас старый конфиг с MACOS_URL)
+# Раскомментируйте и укажите URL, если не хотите использовать словарь
+# MACOS_URL = "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"

@@ -25,13 +25,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_macos_urls() -> dict:
+    """Получить словарь URL для мониторинга с поддержкой обратной совместимости"""
+    # Новый формат: словарь MACOS_URLS
+    if hasattr(config, 'MACOS_URLS') and config.MACOS_URLS:
+        return config.MACOS_URLS
+    # Старый формат: одиночный MACOS_URL
+    if hasattr(config, 'MACOS_URL') and config.MACOS_URL:
+        return {"Sequoia": config.MACOS_URL}
+    # По умолчанию
+    return {"Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"}
+
+
 class MacOSUpdateBot:
     def __init__(self):
         self.db = Database()
-        self.scraper = MacOSScraper(config.MACOS_URL)
+        # Создаём scrapers для каждой версии macOS
+        self.macos_urls = get_macos_urls()
+        self.scrapers = {
+            name: MacOSScraper(url, macos_version=name)
+            for name, url in self.macos_urls.items()
+        }
         self.app = Application.builder().token(config.BOT_TOKEN).build()
         self.scheduler = AsyncIOScheduler()
-        
+
         # Регистрация команд
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
@@ -61,16 +78,18 @@ class MacOSUpdateBot:
             )
             return
 
+        macos_versions_list = ", ".join(self.macos_urls.keys())
         welcome_message = (
-            "👋 Привет! Я бот для отслеживания обновлений macOS Sequoia.\n\n"
+            f"👋 Привет! Я бот для отслеживания обновлений macOS.\n\n"
+            f"🖥️ Отслеживаемые версии: {macos_versions_list}\n\n"
             "📱 Доступные команды:\n"
             "/start - Это сообщение\n"
             "/help - Справка по командам\n"
             "/status - Статус и последняя проверка\n"
-            "/latest - Показать последний релиз\n"
+            "/latest - Показать последние релизы\n"
             "/myid - Узнать свой Telegram ID\n"
         )
-        
+
         if self.is_admin(user_id):
             welcome_message += "/check - Принудительная проверка обновлений (админ)\n"
 
@@ -115,7 +134,8 @@ class MacOSUpdateBot:
 
         last_check = self.db.get_last_check()
         total_releases = self.db.count_releases()
-        
+        releases_by_macos = self.db.count_releases_by_macos()
+
         if last_check:
             check_time = datetime.fromisoformat(last_check['check_time'])
             status_text = (
@@ -123,15 +143,21 @@ class MacOSUpdateBot:
                 f"🕐 Последняя проверка: {check_time.strftime('%d.%m.%Y %H:%M:%S')}\n"
                 f"📦 Найдено релизов: {last_check['releases_found']}\n"
                 f"🆕 Новых релизов: {last_check['new_releases']}\n"
-                f"✅ Статус: {last_check['status']}\n"
-                f"💾 Всего в БД: {total_releases}\n\n"
-                f"⏱ Интервал проверки: {config.CHECK_INTERVAL // 3600} час(а)"
+                f"✅ Статус: {last_check['status']}\n\n"
+                f"💾 *Всего в БД:* {total_releases}\n"
             )
+            # Статистика по версиям macOS
+            if releases_by_macos:
+                for macos_ver, count in sorted(releases_by_macos.items()):
+                    status_text += f"  • macOS {macos_ver}: {count}\n"
+            status_text += f"\n🖥️ Отслеживаемые версии: {', '.join(self.macos_urls.keys())}\n"
+            status_text += f"⏱ Интервал проверки: {config.CHECK_INTERVAL // 3600} час(а)"
         else:
             status_text = (
                 "📊 *Статус бота*\n\n"
                 "Проверок еще не было.\n"
                 f"💾 Всего в БД: {total_releases}\n"
+                f"🖥️ Отслеживаемые версии: {', '.join(self.macos_urls.keys())}\n"
                 f"⏱ Интервал проверки: {config.CHECK_INTERVAL // 3600} час(а)"
             )
 
@@ -143,35 +169,50 @@ class MacOSUpdateBot:
             await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
             return
 
-        latest_public = self.db.get_latest_release('public')
-        latest_beta = self.db.get_latest_release('beta')
+        # Получаем последние релизы для каждой версии macOS
+        latest_public_by_macos = self.db.get_latest_releases_by_macos('public')
+        latest_beta_by_macos = self.db.get_latest_releases_by_macos('beta')
 
-        response = "📦 *Последние релизы macOS Sequoia*\n\n"
+        response = "📦 *Последние релизы macOS*\n\n"
 
-        if latest_public:
-            response += (
-                f"🟢 *Public Release*\n"
-                f"📦 Версия: {latest_public['version']}\n"
-                f"🔨 Build: {latest_public['build']}\n"
-                f"📅 Обнаружен: {datetime.fromisoformat(latest_public['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
-                f"⬇️ [Скачать]({latest_public['download_url']})\n\n"
-            )
+        # Объединяем все версии macOS
+        all_macos_versions = set(latest_public_by_macos.keys()) | set(latest_beta_by_macos.keys())
+
+        if not all_macos_versions:
+            response += "Нет данных о релизах."
         else:
-            response += "🟢 *Public Release*\nНет данных\n\n"
+            for macos_ver in sorted(all_macos_versions, reverse=True):
+                response += f"🖥️ *macOS {macos_ver}*\n\n"
 
-        if latest_beta:
-            response += (
-                f"🟡 *Beta Release*\n"
-                f"📦 Версия: {latest_beta['version']}\n"
-                f"🔨 Build: {latest_beta['build']}\n"
-                f"📅 Обнаружен: {datetime.fromisoformat(latest_beta['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
-                f"⬇️ [Скачать]({latest_beta['download_url']})\n"
-            )
-        else:
-            response += "🟡 *Beta Release*\nНет данных"
+                latest_public = latest_public_by_macos.get(macos_ver)
+                latest_beta = latest_beta_by_macos.get(macos_ver)
+
+                if latest_public:
+                    response += (
+                        f"🟢 *Public Release*\n"
+                        f"📦 Версия: {latest_public['version']}\n"
+                        f"🔨 Build: {latest_public['build']}\n"
+                        f"📅 Обнаружен: {datetime.fromisoformat(latest_public['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
+                        f"⬇️ [Скачать]({latest_public['download_url']})\n\n"
+                    )
+                else:
+                    response += "🟢 *Public Release*\nНет данных\n\n"
+
+                if latest_beta:
+                    response += (
+                        f"🟡 *Beta Release*\n"
+                        f"📦 Версия: {latest_beta['version']}\n"
+                        f"🔨 Build: {latest_beta['build']}\n"
+                        f"📅 Обнаружен: {datetime.fromisoformat(latest_beta['date_discovered']).strftime('%d.%m.%Y %H:%M')}\n"
+                        f"⬇️ [Скачать]({latest_beta['download_url']})\n\n"
+                    )
+                else:
+                    response += "🟡 *Beta Release*\nНет данных\n\n"
+
+                response += "─────────────────\n\n"
 
         await update.message.reply_text(
-            response, 
+            response,
             parse_mode=ParseMode.MARKDOWN,
             disable_web_page_preview=True
         )
@@ -211,85 +252,122 @@ class MacOSUpdateBot:
         )
 
     async def check_for_updates(self):
-        """Проверка обновлений"""
+        """Проверка обновлений для всех версий macOS"""
         logger.info("Начинаю проверку обновлений...")
-        
+
         # Проверяем, первый ли это запуск
         is_first_run = self.db.count_releases() == 0
-        
-        result = self.scraper.scrape()
-        
-        if not result['success']:
-            logger.error(f"Ошибка при проверке: {result['error']}")
-            self.db.add_check_history(0, 0, f"Ошибка: {result['error']}")
-            return
 
-        releases = result['releases']
-        new_releases = []
+        all_releases = []
+        all_new_releases = []
+        errors = []
 
-        # Проверяем каждый релиз
-        for release in releases:
-            added = self.db.add_release(
-                release['version'],
-                release['build'],
-                release['release_type'],
-                release['date_published'],
-                release['download_url']
-            )
-            
-            if added:
-                new_releases.append(release)
+        # Проверяем каждую версию macOS
+        for macos_name, scraper in self.scrapers.items():
+            logger.info(f"Проверяю macOS {macos_name}...")
+            result = scraper.scrape()
+
+            if not result['success']:
+                logger.error(f"Ошибка при проверке macOS {macos_name}: {result['error']}")
+                errors.append(f"{macos_name}: {result['error']}")
+                continue
+
+            releases = result['releases']
+            all_releases.extend(releases)
+
+            # Проверяем каждый релиз
+            for release in releases:
+                added = self.db.add_release(
+                    release['version'],
+                    release['build'],
+                    release['release_type'],
+                    release['date_published'],
+                    release['download_url'],
+                    release.get('macos_version', macos_name)
+                )
+
+                if added:
+                    all_new_releases.append(release)
+
+        # Формируем статус проверки
+        if errors:
+            status = f"Частично: ошибки в {', '.join(errors)}"
+        else:
+            status = "Успешно"
 
         # Сохраняем историю проверки
         self.db.add_check_history(
-            len(releases),
-            len(new_releases),
-            "Успешно"
+            len(all_releases),
+            len(all_new_releases),
+            status
         )
 
-        logger.info(f"Проверка завершена. Найдено релизов: {len(releases)}, новых: {len(new_releases)}")
+        logger.info(f"Проверка завершена. Найдено релизов: {len(all_releases)}, новых: {len(all_new_releases)}")
 
         # Отправляем уведомления о новых релизах
-        if new_releases:
+        if all_new_releases:
             if is_first_run:
                 # При первом запуске отправляем только сводку
-                logger.info(f"Первый запуск: найдено {len(new_releases)} релизов, отправляю только сводку")
-                await self.send_first_run_summary(new_releases)
+                logger.info(f"Первый запуск: найдено {len(all_new_releases)} релизов, отправляю только сводку")
+                await self.send_first_run_summary(all_new_releases)
             else:
                 # При обычной работе отправляем уведомления о каждом новом релизе
-                await self.send_notifications(new_releases)
+                await self.send_notifications(all_new_releases)
 
     async def send_first_run_summary(self, releases: list):
         """Отправка сводки при первом запуске (вместо спама всеми релизами)"""
         public_releases = [r for r in releases if r['release_type'] == 'public']
         beta_releases = [r for r in releases if r['release_type'] == 'beta']
-        
-        # Получаем самые новые версии
-        latest_public = self.db.get_latest_release('public')
-        latest_beta = self.db.get_latest_release('beta')
-        
+
+        # Группируем по версиям macOS
+        releases_by_macos = {}
+        for r in releases:
+            macos_ver = r.get('macos_version', 'Sequoia')
+            if macos_ver not in releases_by_macos:
+                releases_by_macos[macos_ver] = {'public': 0, 'beta': 0}
+            releases_by_macos[macos_ver][r['release_type']] += 1
+
         message = (
             "🎉 *Бот запущен!*\n\n"
             f"Добавлено в базу данных:\n"
             f"🟢 Public релизов: {len(public_releases)}\n"
             f"🟡 Beta релизов: {len(beta_releases)}\n\n"
-            "*Последние версии:*\n\n"
         )
-        
-        if latest_public:
-            message += (
-                f"🟢 *Public:* {latest_public['version']} (Build {latest_public['build']})\n"
-                f"⬇️ [Скачать]({latest_public['download_url']})\n\n"
-            )
-        
-        if latest_beta:
-            message += (
-                f"🟡 *Beta:* {latest_beta['version']} (Build {latest_beta['build']})\n"
-                f"⬇️ [Скачать]({latest_beta['download_url']})\n\n"
-            )
-        
-        message += "Используйте /latest для просмотра последних релизов."
-        
+
+        # Показываем статистику по версиям macOS
+        if len(releases_by_macos) > 1:
+            message += "*По версиям macOS:*\n"
+            for macos_ver in sorted(releases_by_macos.keys(), reverse=True):
+                counts = releases_by_macos[macos_ver]
+                message += f"  • {macos_ver}: {counts['public']} public, {counts['beta']} beta\n"
+            message += "\n"
+
+        message += "*Последние версии:*\n\n"
+
+        # Получаем последние релизы для каждой версии macOS
+        latest_public_by_macos = self.db.get_latest_releases_by_macos('public')
+        latest_beta_by_macos = self.db.get_latest_releases_by_macos('beta')
+
+        for macos_ver in sorted(set(latest_public_by_macos.keys()) | set(latest_beta_by_macos.keys()), reverse=True):
+            message += f"🖥️ *macOS {macos_ver}:*\n"
+
+            latest_public = latest_public_by_macos.get(macos_ver)
+            latest_beta = latest_beta_by_macos.get(macos_ver)
+
+            if latest_public:
+                message += (
+                    f"🟢 Public: {latest_public['version']} (Build {latest_public['build']})\n"
+                )
+
+            if latest_beta:
+                message += (
+                    f"🟡 Beta: {latest_beta['version']} (Build {latest_beta['build']})\n"
+                )
+
+            message += "\n"
+
+        message += "Используйте /latest для просмотра подробной информации."
+
         for chat_id in config.NOTIFICATION_TARGETS:
             try:
                 await self.app.bot.send_message(
@@ -306,7 +384,7 @@ class MacOSUpdateBot:
         """Отправка уведомлений о новых релизах"""
         for release in releases:
             message = self.format_release_message(release)
-            
+
             for chat_id in config.NOTIFICATION_TARGETS:
                 try:
                     await self.app.bot.send_message(
@@ -316,12 +394,13 @@ class MacOSUpdateBot:
                         disable_web_page_preview=True
                     )
                     logger.info(f"Уведомление отправлено в чат {chat_id}")
-                    
+
                     # Отмечаем как уведомленный
                     self.db.mark_as_notified(
                         release['version'],
                         release['build'],
-                        release['release_type']
+                        release['release_type'],
+                        release.get('macos_version', 'Sequoia')
                     )
                 except Exception as e:
                     logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
@@ -330,22 +409,23 @@ class MacOSUpdateBot:
         """Форматирование сообщения о релизе"""
         emoji = "🟢" if release['release_type'] == 'public' else "🟡"
         type_name = "Public Release" if release['release_type'] == 'public' else "Beta Release"
-        
+        macos_version = release.get('macos_version', 'Sequoia')
+
         message = (
-            f"{emoji} *Новый релиз macOS Sequoia!*\n\n"
+            f"{emoji} *Новый релиз macOS {macos_version}!*\n\n"
             f"📦 Версия: `{release['version']}`\n"
             f"🔨 Build: `{release['build']}`\n"
             f"🏷️ Тип: {type_name}\n"
         )
-        
+
         if release['date_published']:
             message += f"📅 Дата: {release['date_published']}\n"
-        
+
         if release['download_url']:
             message += f"\n⬇️ [Скачать InstallAssistant.pkg]({release['download_url']})\n"
-        
+
         message += "\n💾 Размер: ~13 GB"
-        
+
         return message
 
     async def scheduled_check(self):
@@ -362,12 +442,13 @@ class MacOSUpdateBot:
             id='check_updates'
         )
         self.scheduler.start()
-        
+
         logger.info("Бот запущен!")
         logger.info(f"Интервал проверки: {config.CHECK_INTERVAL} секунд")
+        logger.info(f"Отслеживаемые версии macOS: {list(self.macos_urls.keys())}")
         logger.info(f"Авторизованные пользователи: {config.ALLOWED_USER_IDS}")
         logger.info(f"Цели уведомлений: {config.NOTIFICATION_TARGETS}")
-        
+
         # Запуск бота
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
 
