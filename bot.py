@@ -37,6 +37,13 @@ def get_macos_urls() -> dict:
     return {"Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"}
 
 
+def get_config_targets() -> list:
+    """Получить таргеты из конфига (для обратной совместимости)"""
+    if hasattr(config, 'NOTIFICATION_TARGETS') and config.NOTIFICATION_TARGETS:
+        return list(config.NOTIFICATION_TARGETS)
+    return []
+
+
 class MacOSUpdateBot:
     def __init__(self):
         self.db = Database()
@@ -56,6 +63,11 @@ class MacOSUpdateBot:
         self.app.add_handler(CommandHandler("latest", self.latest_command))
         self.app.add_handler(CommandHandler("check", self.check_command))
         self.app.add_handler(CommandHandler("myid", self.myid_command))
+        # Админские команды
+        self.app.add_handler(CommandHandler("broadcast", self.broadcast_command))
+        self.app.add_handler(CommandHandler("targets", self.targets_command))
+        self.app.add_handler(CommandHandler("addtarget", self.addtarget_command))
+        self.app.add_handler(CommandHandler("removetarget", self.removetarget_command))
 
     def is_authorized(self, user_id: int) -> bool:
         """Проверка авторизации пользователя"""
@@ -64,6 +76,14 @@ class MacOSUpdateBot:
     def is_admin(self, user_id: int) -> bool:
         """Проверка прав администратора"""
         return user_id in config.ADMIN_USER_IDS
+
+    def get_all_targets(self) -> list:
+        """Получить все цели уведомлений (из БД + из конфига)"""
+        db_targets = self.db.get_notification_target_ids()
+        config_targets = get_config_targets()
+        # Объединяем, убираем дубликаты
+        all_targets = list(set(db_targets + config_targets))
+        return all_targets
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /start"""
@@ -91,7 +111,11 @@ class MacOSUpdateBot:
         )
 
         if self.is_admin(user_id):
-            welcome_message += "/check - Принудительная проверка обновлений (админ)\n"
+            welcome_message += (
+                "/check - Принудительная проверка обновлений\n"
+                "/broadcast - Отправить релизы в каналы\n"
+                "/targets - Управление уведомлениями\n"
+            )
 
         welcome_message += (
             "\n🔔 Я автоматически проверяю обновления каждые "
@@ -108,15 +132,23 @@ class MacOSUpdateBot:
 
         help_text = (
             "ℹ️ *Справка по командам*\n\n"
+            "*Основные:*\n"
             "/start - Приветствие и список команд\n"
             "/help - Эта справка\n"
             "/status - Показать статус бота и время последней проверки\n"
-            "/latest - Показать информацию о последнем релизе\n"
+            "/latest - Показать информацию о последних релизах\n"
             "/myid - Узнать свой Telegram ID\n"
         )
-        
+
         if self.is_admin(update.effective_user.id):
-            help_text += "/check - Запустить проверку обновлений прямо сейчас\n"
+            help_text += (
+                "\n*Администрирование:*\n"
+                "/check - Запустить проверку обновлений\n"
+                "/broadcast - Отправить последние релизы во все каналы\n"
+                "/targets - Показать цели уведомлений\n"
+                "/addtarget `ID` `имя` - Добавить цель\n"
+                "/removetarget `ID` - Удалить цель\n"
+            )
 
         help_text += (
             "\n📋 *О боте:*\n"
@@ -241,7 +273,7 @@ class MacOSUpdateBot:
         user_id = update.effective_user.id
         username = update.effective_user.username or "не установлен"
         first_name = update.effective_user.first_name or "не указано"
-        
+
         await update.message.reply_text(
             f"👤 *Ваша информация*\n\n"
             f"🆔 ID: `{user_id}`\n"
@@ -250,6 +282,234 @@ class MacOSUpdateBot:
             f"Скопируйте ID и отправьте администратору для получения доступа.",
             parse_mode=ParseMode.MARKDOWN
         )
+
+    async def broadcast_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /broadcast - отправить последние релизы во все таргеты"""
+        user_id = update.effective_user.id
+
+        if not self.is_authorized(user_id):
+            await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+            return
+
+        if not self.is_admin(user_id):
+            await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+            return
+
+        targets = self.get_all_targets()
+        if not targets:
+            await update.message.reply_text("⚠️ Нет настроенных целей уведомлений.")
+            return
+
+        await update.message.reply_text(f"📢 Отправляю последние релизы в {len(targets)} чат(ов)...")
+
+        # Формируем сообщение с последними релизами
+        message = await self._format_latest_releases_message()
+
+        sent_count = 0
+        errors = []
+
+        for chat_id in targets:
+            try:
+                await self.app.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=True
+                )
+                sent_count += 1
+                logger.info(f"Broadcast отправлен в чат {chat_id}")
+            except Exception as e:
+                errors.append(f"{chat_id}: {str(e)[:50]}")
+                logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
+
+        result_text = f"✅ Отправлено: {sent_count}/{len(targets)}"
+        if errors:
+            result_text += f"\n\n❌ Ошибки:\n" + "\n".join(errors[:5])
+            if len(errors) > 5:
+                result_text += f"\n...и ещё {len(errors) - 5}"
+
+        await update.message.reply_text(result_text)
+
+    async def _format_latest_releases_message(self) -> str:
+        """Форматирование сообщения с последними релизами для broadcast"""
+        latest_public_by_macos = self.db.get_latest_releases_by_macos('public')
+        latest_beta_by_macos = self.db.get_latest_releases_by_macos('beta')
+
+        message = "📦 *Последние релизы macOS*\n\n"
+
+        all_macos_versions = set(latest_public_by_macos.keys()) | set(latest_beta_by_macos.keys())
+
+        if not all_macos_versions:
+            message += "Нет данных о релизах."
+        else:
+            for macos_ver in sorted(all_macos_versions, reverse=True):
+                message += f"🖥️ *macOS {macos_ver}*\n"
+
+                latest_public = latest_public_by_macos.get(macos_ver)
+                latest_beta = latest_beta_by_macos.get(macos_ver)
+
+                if latest_public:
+                    message += (
+                        f"🟢 Public: {latest_public['version']} "
+                        f"(Build {latest_public['build']})\n"
+                        f"⬇️ [Скачать]({latest_public['download_url']})\n"
+                    )
+
+                if latest_beta:
+                    message += (
+                        f"🟡 Beta: {latest_beta['version']} "
+                        f"(Build {latest_beta['build']})\n"
+                        f"⬇️ [Скачать]({latest_beta['download_url']})\n"
+                    )
+
+                message += "\n"
+
+        return message
+
+    async def targets_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /targets - показать все цели уведомлений"""
+        user_id = update.effective_user.id
+
+        if not self.is_authorized(user_id):
+            await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+            return
+
+        if not self.is_admin(user_id):
+            await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+            return
+
+        db_targets = self.db.get_notification_targets()
+        config_targets = get_config_targets()
+
+        message = "📋 *Цели уведомлений*\n\n"
+
+        if db_targets:
+            message += "*Из базы данных (динамические):*\n"
+            for t in db_targets:
+                target_type_emoji = "📱" if t['target_type'] == 'channel' else "👤"
+                name = t['name'] or t['target_type']
+                message += f"{target_type_emoji} `{t['chat_id']}` - {name}\n"
+            message += "\n"
+
+        if config_targets:
+            message += "*Из config.py (статические):*\n"
+            for chat_id in config_targets:
+                message += f"📌 `{chat_id}`\n"
+            message += "\n"
+
+        if not db_targets and not config_targets:
+            message += "Нет настроенных целей.\n\n"
+
+        message += (
+            "*Управление:*\n"
+            "/addtarget `ID` `имя` - добавить\n"
+            "/removetarget `ID` - удалить"
+        )
+
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+    async def addtarget_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /addtarget - добавить цель уведомлений"""
+        user_id = update.effective_user.id
+
+        if not self.is_authorized(user_id):
+            await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+            return
+
+        if not self.is_admin(user_id):
+            await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+            return
+
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "ℹ️ *Использование:*\n"
+                "`/addtarget ID [имя]`\n\n"
+                "*Примеры:*\n"
+                "`/addtarget 123456789` - личный чат\n"
+                "`/addtarget -1001234567890 Мой канал` - канал\n\n"
+                "💡 ID канала начинается с `-100`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        try:
+            chat_id = int(args[0])
+        except ValueError:
+            await update.message.reply_text("❌ ID должен быть числом.")
+            return
+
+        name = " ".join(args[1:]) if len(args) > 1 else None
+        target_type = 'channel' if chat_id < 0 else 'user'
+
+        if self.db.target_exists(chat_id):
+            await update.message.reply_text(f"⚠️ Цель `{chat_id}` уже существует.", parse_mode=ParseMode.MARKDOWN)
+            return
+
+        success = self.db.add_notification_target(
+            chat_id=chat_id,
+            name=name,
+            target_type=target_type,
+            added_by=user_id
+        )
+
+        if success:
+            await update.message.reply_text(
+                f"✅ Добавлена цель уведомлений:\n"
+                f"🆔 ID: `{chat_id}`\n"
+                f"📝 Имя: {name or 'не указано'}\n"
+                f"🏷️ Тип: {target_type}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text("❌ Не удалось добавить цель.")
+
+    async def removetarget_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /removetarget - удалить цель уведомлений"""
+        user_id = update.effective_user.id
+
+        if not self.is_authorized(user_id):
+            await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+            return
+
+        if not self.is_admin(user_id):
+            await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+            return
+
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "ℹ️ *Использование:*\n"
+                "`/removetarget ID`\n\n"
+                "*Пример:*\n"
+                "`/removetarget 123456789`\n\n"
+                "⚠️ Можно удалить только динамические цели (из БД).\n"
+                "Цели из config.py удаляются редактированием файла.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        try:
+            chat_id = int(args[0])
+        except ValueError:
+            await update.message.reply_text("❌ ID должен быть числом.")
+            return
+
+        # Проверяем, не в конфиге ли этот таргет
+        if chat_id in get_config_targets():
+            await update.message.reply_text(
+                f"⚠️ Цель `{chat_id}` находится в config.py и не может быть удалена через бота.\n"
+                "Отредактируйте файл config.py для удаления.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        success = self.db.remove_notification_target(chat_id)
+
+        if success:
+            await update.message.reply_text(f"✅ Цель `{chat_id}` удалена.", parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text(f"❌ Цель `{chat_id}` не найдена в базе данных.", parse_mode=ParseMode.MARKDOWN)
 
     async def check_for_updates(self):
         """Проверка обновлений для всех версий macOS"""
@@ -368,7 +628,7 @@ class MacOSUpdateBot:
 
         message += "Используйте /latest для просмотра подробной информации."
 
-        for chat_id in config.NOTIFICATION_TARGETS:
+        for chat_id in self.get_all_targets():
             try:
                 await self.app.bot.send_message(
                     chat_id=chat_id,
@@ -385,7 +645,7 @@ class MacOSUpdateBot:
         for release in releases:
             message = self.format_release_message(release)
 
-            for chat_id in config.NOTIFICATION_TARGETS:
+            for chat_id in self.get_all_targets():
                 try:
                     await self.app.bot.send_message(
                         chat_id=chat_id,
@@ -447,7 +707,7 @@ class MacOSUpdateBot:
         logger.info(f"Интервал проверки: {config.CHECK_INTERVAL} секунд")
         logger.info(f"Отслеживаемые версии macOS: {list(self.macos_urls.keys())}")
         logger.info(f"Авторизованные пользователи: {config.ALLOWED_USER_IDS}")
-        logger.info(f"Цели уведомлений: {config.NOTIFICATION_TARGETS}")
+        logger.info(f"Цели уведомлений: {self.get_all_targets()}")
 
         # Запуск бота
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)

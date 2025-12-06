@@ -53,7 +53,19 @@ class Database:
                     status TEXT
                 )
             """)
-            
+
+            # Таблица целей уведомлений (динамическое управление)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notification_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL UNIQUE,
+                    name TEXT,
+                    target_type TEXT DEFAULT 'user',
+                    added_by INTEGER,
+                    added_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
             logger.info("База данных инициализирована")
 
@@ -240,3 +252,70 @@ class Database:
                 GROUP BY macos_version
             """)
             return {row[0]: row[1] for row in cursor.fetchall()}
+
+    # ===== Управление целями уведомлений =====
+
+    def add_notification_target(self, chat_id: int, name: str = None,
+                                target_type: str = 'user', added_by: int = None) -> bool:
+        """Добавить цель для уведомлений"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO notification_targets (chat_id, name, target_type, added_by, added_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (chat_id, name, target_type, added_by, datetime.now().isoformat()))
+                conn.commit()
+                logger.info(f"Добавлена цель уведомлений: {chat_id} ({name or target_type})")
+                return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"Цель уведомлений {chat_id} уже существует")
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении цели уведомлений: {e}")
+            return False
+
+    def remove_notification_target(self, chat_id: int) -> bool:
+        """Удалить цель уведомлений"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM notification_targets WHERE chat_id = ?", (chat_id,))
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            if deleted:
+                logger.info(f"Удалена цель уведомлений: {chat_id}")
+            return deleted
+
+    def get_notification_targets(self) -> List[Dict]:
+        """Получить все цели уведомлений"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT chat_id, name, target_type, added_by, added_at
+                FROM notification_targets
+                ORDER BY id
+            """)
+            return [
+                {
+                    'chat_id': row[0],
+                    'name': row[1],
+                    'target_type': row[2],
+                    'added_by': row[3],
+                    'added_at': row[4]
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def get_notification_target_ids(self) -> List[int]:
+        """Получить только ID целей уведомлений"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT chat_id FROM notification_targets")
+            return [row[0] for row in cursor.fetchall()]
+
+    def target_exists(self, chat_id: int) -> bool:
+        """Проверить существование цели уведомлений"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM notification_targets WHERE chat_id = ?", (chat_id,))
+            return cursor.fetchone() is not None
