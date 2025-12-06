@@ -1,6 +1,6 @@
 # 🍎 macOS Update Checker Bot
 
-Telegram-бот для автоматического отслеживания новых релизов macOS Sequoia с сайта [Mr. Macintosh](https://mrmacintosh.com/).
+Telegram-бот для автоматического отслеживания новых релизов macOS (Sequoia, Sonoma, Ventura и др.) с сайта [Mr. Macintosh](https://mrmacintosh.com/).
 
 ## 🚀 Как это работает
 
@@ -17,11 +17,13 @@ graph LR
 
 ## ✨ Возможности
 
-- 🔍 Автоматический мониторинг страницы с релизами macOS Sequoia
+- 🔍 Автоматический мониторинг **нескольких версий macOS** (Tahoe, Sequoia, Sonoma и др.)
 - 🔔 Мгновенные уведомления о новых версиях (Public и Beta)
 - 📊 Детальная информация о каждом релизе (версия, build, ссылка на скачивание)
+- 🖥️ Поддержка мониторинга нескольких URL одновременно
+- 📢 **Динамическое управление уведомлениями** через бота (без редактирования конфига)
+- 📤 Команда `/broadcast` для отправки релизов во все каналы
 - 🛡️ Whitelist пользователей для защиты от несанкционированного доступа
-- 📢 Поддержка каналов для массовых уведомлений
 - 💾 SQLite база данных для хранения истории релизов
 - 🐳 Docker контейнер для удобного развертывания
 
@@ -131,18 +133,75 @@ ADMIN_USER_IDS = [
 
 # Интервал проверки (в секундах)
 CHECK_INTERVAL = 3600  # 1 час
+
+# URL страниц для мониторинга разных версий macOS
+# Ключ - название версии (отображается в уведомлениях)
+# Значение - URL страницы для парсинга
+MACOS_URLS = {
+    "Tahoe": "https://mrmacintosh.com/macos-tahoe-full-installer-database-download-directly-from-apple/",
+    "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
+    # "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
+}
+```
+
+### Мониторинг нескольких версий macOS
+
+Бот поддерживает мониторинг нескольких версий macOS одновременно. Просто добавьте нужные URL в словарь `MACOS_URLS`:
+
+```python
+MACOS_URLS = {
+    "Sequoia": "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/",
+    "Sonoma": "https://mrmacintosh.com/macos-sonoma-full-installer-database-download-directly-from-apple/",
+    "Ventura": "https://mrmacintosh.com/macos-ventura-full-installer-database-download-directly-from-apple/",
+}
+```
+
+Для обратной совместимости также поддерживается старый формат с одним URL:
+
+```python
+MACOS_URL = "https://mrmacintosh.com/macos-sequoia-full-installer-database-download-directly-from-apple/"
 ```
 
 ## 🤖 Команды бота
+
+### Основные команды
 
 | Команда | Описание | Доступ |
 |---------|----------|--------|
 | `/start` | Приветствие и список команд | Все |
 | `/help` | Справка по использованию | Все |
 | `/status` | Статус бота и последняя проверка | Все |
-| `/latest` | Последний релиз (Public и Beta) | Все |
+| `/latest` | Последние релизы всех версий macOS (Public и Beta) | Все |
 | `/myid` | Узнать свой Telegram ID | Все |
-| `/check` | Принудительная проверка | 🔐 Админы |
+
+### Команды администратора
+
+| Команда | Описание |
+|---------|----------|
+| `/check` | Принудительная проверка обновлений |
+| `/broadcast` | Отправить последние релизы во все каналы/чаты |
+| `/targets` | Показать все цели уведомлений |
+| `/addtarget ID [имя]` | Добавить цель уведомлений (канал или чат) |
+| `/removetarget ID` | Удалить цель уведомлений |
+| `/exporttargets` | Экспорт таргетов для вставки в config.py |
+
+### Динамическое управление уведомлениями
+
+Теперь можно добавлять и удалять цели уведомлений **прямо через бота**, без редактирования конфига и пересборки контейнера:
+
+```
+/addtarget -1001234567890 Мой канал   # Добавить канал
+/addtarget 123456789 Личный чат       # Добавить пользователя
+/removetarget -1001234567890          # Удалить цель
+/targets                               # Посмотреть все цели
+/exporttargets                         # Экспорт для config.py
+```
+
+**Особенности:**
+- Динамические цели хранятся в SQLite базе данных
+- Сохраняются при перезапуске/пересборке контейнера (volume `./data`)
+- Работают параллельно с целями из `config.py`
+- `/exporttargets` генерирует код для вставки в config.py
 
 ## 📂 Структура проекта
 
@@ -225,4 +284,4 @@ Apache License 2.0
 
 ---
 
-**Создано для мониторинга релизов macOS Sequoia** 🍎
+**Создано для мониторинга релизов macOS** 🍎

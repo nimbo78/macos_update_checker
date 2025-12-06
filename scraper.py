@@ -8,8 +8,9 @@ logger = logging.getLogger(__name__)
 
 
 class MacOSScraper:
-    def __init__(self, url: str):
+    def __init__(self, url: str, macos_version: str = "Sequoia"):
         self.url = url
+        self.macos_version = macos_version
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -79,6 +80,7 @@ class MacOSScraper:
                 'version': version,
                 'build': build,
                 'release_type': release_type,
+                'macos_version': self.macos_version,
                 'date_published': '',
                 'download_url': download_url
             }
@@ -107,13 +109,14 @@ class MacOSScraper:
     def scrape(self) -> Dict:
         """Основной метод для парсинга страницы"""
         html = self.fetch_page()
-        
+
         if not html:
             return {
                 'success': False,
                 'error': 'Не удалось загрузить страницу',
                 'releases': [],
-                'page_updated': None
+                'page_updated': None,
+                'macos_version': self.macos_version
             }
 
         releases = self.parse_releases(html)
@@ -123,5 +126,6 @@ class MacOSScraper:
             'success': True,
             'error': None,
             'releases': releases,
-            'page_updated': page_updated
+            'page_updated': page_updated,
+            'macos_version': self.macos_version
         }
