@@ -68,6 +68,7 @@ class MacOSUpdateBot:
         self.app.add_handler(CommandHandler("targets", self.targets_command))
         self.app.add_handler(CommandHandler("addtarget", self.addtarget_command))
         self.app.add_handler(CommandHandler("removetarget", self.removetarget_command))
+        self.app.add_handler(CommandHandler("exporttargets", self.exporttargets_command))
 
     def is_authorized(self, user_id: int) -> bool:
         """Проверка авторизации пользователя"""
@@ -148,6 +149,7 @@ class MacOSUpdateBot:
                 "/targets - Показать цели уведомлений\n"
                 "/addtarget `ID` `имя` - Добавить цель\n"
                 "/removetarget `ID` - Удалить цель\n"
+                "/exporttargets - Экспорт для config.py\n"
             )
 
         help_text += (
@@ -510,6 +512,57 @@ class MacOSUpdateBot:
             await update.message.reply_text(f"✅ Цель `{chat_id}` удалена.", parse_mode=ParseMode.MARKDOWN)
         else:
             await update.message.reply_text(f"❌ Цель `{chat_id}` не найдена в базе данных.", parse_mode=ParseMode.MARKDOWN)
+
+    async def exporttargets_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /exporttargets - экспорт таргетов для config.py"""
+        user_id = update.effective_user.id
+
+        if not self.is_authorized(user_id):
+            await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+            return
+
+        if not self.is_admin(user_id):
+            await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+            return
+
+        all_targets = self.get_all_targets()
+
+        if not all_targets:
+            await update.message.reply_text("Нет настроенных целей уведомлений.")
+            return
+
+        # Формируем код для config.py
+        targets_str = ",\n    ".join(str(t) for t in sorted(all_targets))
+        config_code = f"""```python
+# Скопируйте в config.py:
+
+NOTIFICATION_TARGETS = [
+    {targets_str},
+]
+```"""
+
+        # Также показываем с комментариями
+        db_targets = self.db.get_notification_targets()
+        detailed_lines = []
+        for t in db_targets:
+            name = t['name'] or t['target_type']
+            detailed_lines.append(f"    {t['chat_id']},  # {name}")
+
+        for chat_id in get_config_targets():
+            if not any(t['chat_id'] == chat_id for t in db_targets):
+                detailed_lines.append(f"    {chat_id},  # из config.py")
+
+        detailed_code = "```python\nNOTIFICATION_TARGETS = [\n" + "\n".join(sorted(detailed_lines)) + "\n]\n```"
+
+        message = (
+            "📤 *Экспорт целей уведомлений*\n\n"
+            "*Простой формат:*\n"
+            f"{config_code}\n\n"
+            "*С комментариями:*\n"
+            f"{detailed_code}"
+        )
+
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
     async def check_for_updates(self):
         """Проверка обновлений для всех версий macOS"""
